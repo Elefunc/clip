@@ -10,7 +10,7 @@
 - `wine cliptrim64.exe` (optional): Quick smoke test on Linux hosts with Wine; confirm console logs appear and clipboard updates succeed.
 
 ## Coding Style & Naming Conventions
-- Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 4-space indentation and brace-on-same-line style already present in `cliptrim.c`.
+- Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 2-space indentation and brace-on-same-line style already present in `cliptrim.c`.
 - Prefer descriptive static helpers (e.g., `handle_clipboard_update`) and snake_case identifiers.
 - Log messages should remain concise, capitalized, and timestamp-friendly to preserve console readability.
 

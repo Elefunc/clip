@@ -310,6 +310,7 @@ static void handle_clipboard_update(HWND hwnd) {
   if (set_clipboard_text(hwnd, trimmed.text, trimmed.length)) {
     log_info("Trimmed clipboard text: removed %zu whitespace char%s across %zu line%s", trimmed.whitespaceRemoved,
              trimmed.whitespaceRemoved == 1 ? "" : "s", trimmed.linesTouched, trimmed.linesTouched == 1 ? "" : "s");
+    MessageBeep(MB_ICONASTERISK);
   } else {
     log_info("Failed to set trimmed text back onto clipboard");
   }

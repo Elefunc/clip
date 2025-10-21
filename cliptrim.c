@@ -343,8 +343,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
 int wmain(void) {
   SetConsoleOutputCP(CP_UTF8);
+  log_info("\xC2\xA9 2025 Elefunc, Inc. All rights reserved.");
+  log_info("https://elefunc.com");
   log_info("Starting Cliptrim clipboard whitespace trimmer");
-  log_info("Elefunc, Inc. - https://elefunc.com");
 
   HINSTANCE hInstance = GetModuleHandle(NULL);
 

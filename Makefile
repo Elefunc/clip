@@ -9,7 +9,7 @@ RC32 := i686-w64-mingw32-windres
 
 CFLAGS_COMMON := -std=c11 -Wall -Wextra -Wpedantic -O2 -municode
 LDFLAGS := -luser32
-RCFLAGS := -O coff
+RCFLAGS := --codepage=65001 -O coff
 
 TARGET64 := cliptrim64.exe
 TARGET32 := cliptrim32.exe

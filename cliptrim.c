@@ -16,8 +16,12 @@
 
 #include "resource.h"
 
+#define WM_APP_EXIT (WM_APP + 1)
+#define SINGLE_INSTANCE_MUTEX_NAME L"Local\\CliptrimSingleton"
+
 static const wchar_t kWindowClassName[] = L"ClipboardTrimWatcher";
 static bool g_isUpdatingClipboard = false;
+static HANDLE g_singleInstanceMutex = NULL;
 
 typedef struct {
   wchar_t* text;
@@ -324,6 +328,36 @@ static void handle_clipboard_update(HWND hwnd) {
   free_clipboard_buffer(&original);
 }
 
+static void release_single_instance_mutex(void) {
+  if (g_singleInstanceMutex) {
+    ReleaseMutex(g_singleInstanceMutex);
+    CloseHandle(g_singleInstanceMutex);
+    g_singleInstanceMutex = NULL;
+  }
+}
+
+static void request_previous_instance_shutdown(void) {
+  HWND existing = FindWindowW(kWindowClassName, NULL);
+  if (!existing) {
+    return;
+  }
+  DWORD existingPid = 0;
+  GetWindowThreadProcessId(existing, &existingPid);
+  if (existingPid == GetCurrentProcessId()) {
+    return;
+  }
+  log_info("Requesting previous instance (PID %lu) to exit", (unsigned long) existingPid);
+  PostMessageW(existing, WM_APP_EXIT, 0, 0);
+  for (int i = 0; i < 200; ++i) {
+    if (!IsWindow(existing)) {
+      log_info("Previous instance exited");
+      return;
+    }
+    Sleep(25);
+  }
+  log_info("Previous instance did not exit within timeout; continuing startup");
+}
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
   case WM_CREATE:
@@ -333,6 +367,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     }
     log_info("Clipboard listener registered");
     return 0;
+  case WM_APP_EXIT:
+    log_info("Received shutdown request from newer instance");
+    DestroyWindow(hwnd);
+    return 0;
   case WM_CLIPBOARDUPDATE:
     handle_clipboard_update(hwnd);
     return 0;
@@ -340,6 +378,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     RemoveClipboardFormatListener(hwnd);
     PostQuitMessage(0);
     log_info("Shutting down");
+    release_single_instance_mutex();
     return 0;
   default:
     return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -351,6 +390,33 @@ int wmain(void) {
   log_info("\xC2\xA9 2025 Elefunc, Inc. All rights reserved.");
   log_info("https://elefunc.com");
   log_info("Starting Cliptrim clipboard whitespace trimmer");
+
+  g_singleInstanceMutex = CreateMutexW(NULL, FALSE, SINGLE_INSTANCE_MUTEX_NAME);
+  if (!g_singleInstanceMutex) {
+    log_info("CreateMutex failed (%lu)", GetLastError());
+    return 1;
+  }
+
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    request_previous_instance_shutdown();
+  }
+
+  DWORD waitResult = WaitForSingleObject(g_singleInstanceMutex, 5000);
+  if (waitResult == WAIT_TIMEOUT) {
+    log_info("Timed out waiting for previous instance to exit");
+    CloseHandle(g_singleInstanceMutex);
+    g_singleInstanceMutex = NULL;
+    return 1;
+  } else if (waitResult == WAIT_FAILED) {
+    log_info("WaitForSingleObject on singleton mutex failed (%lu)", GetLastError());
+    CloseHandle(g_singleInstanceMutex);
+    g_singleInstanceMutex = NULL;
+    return 1;
+  }
+
+  if (waitResult == WAIT_ABANDONED) {
+    log_info("Previous instance ended unexpectedly; continuing startup");
+  }
 
   HINSTANCE hInstance = GetModuleHandle(NULL);
 
@@ -383,6 +449,8 @@ int wmain(void) {
     TranslateMessage(&msg);
     DispatchMessage(&msg);
   }
+
+  release_single_instance_mutex();
 
   return 0;
 }

@@ -25,5 +25,6 @@
 
 ## Agent Notes & Environment
 - Cross-compilers (`x86_64-w64-mingw32-gcc`, `i686-w64-mingw32-gcc`) are expected locally; verify versions before onboarding.
+- On Ubuntu 24.04, install the toolchain via `sudo apt install mingw-w64` before running `make`.
 - Avoid adding compiled binaries to version control. Update `.gitignore` if new build artifacts emerge.
 - When editing, prefer `apply_patch` or targeted diffs to keep reviews small and traceable.

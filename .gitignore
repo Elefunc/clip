@@ -1,0 +1,11 @@
+# Build artifacts
+cliptrim32.exe
+cliptrim64.exe
+*.exe
+*.obj
+*.pdb
+*.ilk
+
+# Temporary files
+*.log
+.DS_Store

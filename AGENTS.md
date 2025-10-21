@@ -29,6 +29,19 @@
 - Follow the existing concise, imperative commit style (e.g., "Add clipboard trimmer source and build"). Keep scope narrow and explain user-facing behavior changes in the body when needed.
 - Pull requests should link relevant issues, summarize behavior changes, list manual tests (commands run, environments), and include screenshots of console logs when they help reviewers.
 
+## Release Checklist
+1. **Update version references**
+   - Edit `cliptrim.rc` and bump `FILEVERSION`, `PRODUCTVERSION`, and the `StringFileInfo` `FileVersion`/`ProductVersion` strings to the new semantic version (e.g., `0.5.2`).
+   - Regenerate the build after editing to refresh `cliptrim32.res`/`cliptrim64.res`.
+   - Commit the change with a message like `Bump version to 0.x.y` and push it upstream.
+2. **Make a clean build**
+   - Run `make clean` to remove prior artifacts.
+   - Run `make` to rebuild `cliptrim32.exe` and `cliptrim64.exe`; confirm both executables are produced without warnings.
+3. **Make a GitHub release**
+   - Tag the release (`git tag -a v0.x.y -m "Cliptrim 0.x.y"` and `git push origin v0.x.y`).
+   - Publish it with the CLI: `gh release create v0.x.y cliptrim64.exe cliptrim32.exe --title "Cliptrim 0.x.y" --notes "<bullet summary + checks>"`.
+   - Double-check the release page to ensure both executables and notes rendered correctly.
+
 ## Agent Notes & Environment
 - Cross-compilers (`x86_64-w64-mingw32-gcc`, `i686-w64-mingw32-gcc`) are expected locally; verify versions before onboarding.
 - On Ubuntu 24.04, install the toolchain via `sudo apt install mingw-w64` before running `make`.

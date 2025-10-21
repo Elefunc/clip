@@ -20,7 +20,7 @@ BEGIN
             VALUE "FileDescription", "Cliptrim Clipboard Whitespace Trimmer\0"
             VALUE "FileVersion", "0.3.0\0"
             VALUE "InternalName", "cliptrim\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 Elefunc, Inc.\0"
+            VALUE "LegalCopyright", "Copyright © 2025 Elefunc, Inc.\0"
             VALUE "OriginalFilename", "cliptrim.exe\0"
             VALUE "ProductName", "Cliptrim Clipboard Whitespace Trimmer\0"
             VALUE "ProductVersion", "0.3.0\0"

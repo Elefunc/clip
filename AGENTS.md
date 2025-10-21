@@ -37,4 +37,4 @@
 
 ---
 
-Cliptrim is an Elefunc, Inc. project — reach us at https://elefunc.com for support or partnership inquiries.
+Cliptrim is an Elefunc, Inc. project — reach us at https://elefunc.com for support.

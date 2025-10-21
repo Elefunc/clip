@@ -16,12 +16,12 @@ static const wchar_t kWindowClassName[] = L"ClipboardTrimWatcher";
 static bool g_isUpdatingClipboard = false;
 
 typedef struct {
-  wchar_t *text;
-  size_t length;  // number of wchar_t excluding null terminator
+  wchar_t* text;
+  size_t length; // number of wchar_t excluding null terminator
 } ClipboardBuffer;
 
 typedef struct {
-  wchar_t *text;
+  wchar_t* text;
   size_t length;
   size_t whitespaceRemoved;
   size_t linesTouched;
@@ -31,14 +31,11 @@ typedef struct {
 static void log_time_prefix(void) {
   SYSTEMTIME st;
   GetLocalTime(&st);
-  printf("[%02u:%02u:%02u.%03u] ",
-           (unsigned)st.wHour,
-           (unsigned)st.wMinute,
-           (unsigned)st.wSecond,
-           (unsigned)st.wMilliseconds);
+  printf("[%02u:%02u:%02u.%03u] ", (unsigned) st.wHour, (unsigned) st.wMinute, (unsigned) st.wSecond,
+         (unsigned) st.wMilliseconds);
 }
 
-static void log_info(const char *fmt, ...) {
+static void log_info(const char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   log_time_prefix();
@@ -59,7 +56,7 @@ static bool try_open_clipboard(HWND hwnd) {
   return false;
 }
 
-static void free_clipboard_buffer(ClipboardBuffer *buffer) {
+static void free_clipboard_buffer(ClipboardBuffer* buffer) {
   if (buffer && buffer->text) {
     free(buffer->text);
     buffer->text = NULL;
@@ -67,7 +64,7 @@ static void free_clipboard_buffer(ClipboardBuffer *buffer) {
   }
 }
 
-static bool fetch_clipboard_text(HWND hwnd, ClipboardBuffer *outBuffer, bool *outWasUnicode) {
+static bool fetch_clipboard_text(HWND hwnd, ClipboardBuffer* outBuffer, bool* outWasUnicode) {
   if (!outBuffer) {
     return false;
   }
@@ -84,14 +81,14 @@ static bool fetch_clipboard_text(HWND hwnd, ClipboardBuffer *outBuffer, bool *ou
 
   HANDLE hData = GetClipboardData(CF_UNICODETEXT);
   if (hData) {
-    wchar_t *locked = (wchar_t *)GlobalLock(hData);
+    wchar_t* locked = (wchar_t*) GlobalLock(hData);
     if (!locked) {
       CloseClipboard();
       log_info("Failed to lock Unicode clipboard data");
       return false;
     }
     size_t len = wcslen(locked);
-    wchar_t *copy = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
+    wchar_t* copy = (wchar_t*) malloc((len + 1) * sizeof(wchar_t));
     if (!copy) {
       GlobalUnlock(hData);
       CloseClipboard();
@@ -114,7 +111,7 @@ static bool fetch_clipboard_text(HWND hwnd, ClipboardBuffer *outBuffer, bool *ou
     CloseClipboard();
     return false;
   }
-  char *lockedAnsi = (char *)GlobalLock(hAnsi);
+  char* lockedAnsi = (char*) GlobalLock(hAnsi);
   if (!lockedAnsi) {
     CloseClipboard();
     log_info("Failed to lock ANSI clipboard data");
@@ -127,7 +124,7 @@ static bool fetch_clipboard_text(HWND hwnd, ClipboardBuffer *outBuffer, bool *ou
     log_info("Failed to convert ANSI clipboard data to Unicode");
     return false;
   }
-  wchar_t *copy = (wchar_t *)malloc((size_t)required * sizeof(wchar_t));
+  wchar_t* copy = (wchar_t*) malloc((size_t) required * sizeof(wchar_t));
   if (!copy) {
     GlobalUnlock(hAnsi);
     CloseClipboard();
@@ -142,13 +139,13 @@ static bool fetch_clipboard_text(HWND hwnd, ClipboardBuffer *outBuffer, bool *ou
   return true;
 }
 
-static TrimmedBuffer trim_lines_preserving_breaks(const wchar_t *input, size_t length) {
+static TrimmedBuffer trim_lines_preserving_breaks(const wchar_t* input, size_t length) {
   TrimmedBuffer result = {0};
   if (!input) {
     return result;
   }
 
-  wchar_t *output = (wchar_t *)malloc((length + 1) * sizeof(wchar_t));
+  wchar_t* output = (wchar_t*) malloc((length + 1) * sizeof(wchar_t));
   if (!output) {
     return result;
   }
@@ -168,12 +165,14 @@ static TrimmedBuffer trim_lines_preserving_breaks(const wchar_t *input, size_t l
     }
 
     size_t trimStart = lineStart;
-    while (trimStart < lineEnd && iswspace(input[trimStart]) && input[trimStart] != L'\r' && input[trimStart] != L'\n') {
+    while (trimStart < lineEnd && iswspace(input[trimStart]) && input[trimStart] != L'\r' &&
+           input[trimStart] != L'\n') {
       trimStart++;
     }
 
     size_t trimEnd = lineEnd;
-    while (trimEnd > trimStart && iswspace(input[trimEnd - 1]) && input[trimEnd - 1] != L'\r' && input[trimEnd - 1] != L'\n') {
+    while (trimEnd > trimStart && iswspace(input[trimEnd - 1]) && input[trimEnd - 1] != L'\r' &&
+           input[trimEnd - 1] != L'\n') {
       trimEnd--;
     }
 
@@ -227,7 +226,7 @@ static TrimmedBuffer trim_lines_preserving_breaks(const wchar_t *input, size_t l
   return result;
 }
 
-static bool set_clipboard_text(HWND hwnd, const wchar_t *text, size_t length) {
+static bool set_clipboard_text(HWND hwnd, const wchar_t* text, size_t length) {
   if (!text) {
     return false;
   }
@@ -251,7 +250,7 @@ static bool set_clipboard_text(HWND hwnd, const wchar_t *text, size_t length) {
     return false;
   }
 
-  void *dest = GlobalLock(hMem);
+  void* dest = GlobalLock(hMem);
   if (!dest) {
     GlobalFree(hMem);
     CloseClipboard();
@@ -299,9 +298,7 @@ static void handle_clipboard_update(HWND hwnd) {
   }
 
   if (!changed) {
-    log_info("Clipboard text already trimmed (%zu line%s)",
-                 trimmed.lineCount,
-                 trimmed.lineCount == 1 ? "" : "s");
+    log_info("Clipboard text already trimmed (%zu line%s)", trimmed.lineCount, trimmed.lineCount == 1 ? "" : "s");
     free(trimmed.text);
     free_clipboard_buffer(&original);
     return;
@@ -309,11 +306,8 @@ static void handle_clipboard_update(HWND hwnd) {
 
   g_isUpdatingClipboard = true;
   if (set_clipboard_text(hwnd, trimmed.text, trimmed.length)) {
-    log_info("Trimmed clipboard text: removed %zu whitespace char%s across %zu line%s", 
-                 trimmed.whitespaceRemoved,
-                 trimmed.whitespaceRemoved == 1 ? "" : "s",
-                 trimmed.linesTouched,
-                 trimmed.linesTouched == 1 ? "" : "s");
+    log_info("Trimmed clipboard text: removed %zu whitespace char%s across %zu line%s", trimmed.whitespaceRemoved,
+             trimmed.whitespaceRemoved == 1 ? "" : "s", trimmed.linesTouched, trimmed.linesTouched == 1 ? "" : "s");
   } else {
     log_info("Failed to set trimmed text back onto clipboard");
   }
@@ -325,23 +319,23 @@ static void handle_clipboard_update(HWND hwnd) {
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
-    case WM_CREATE:
-      if (!AddClipboardFormatListener(hwnd)) {
-        log_info("AddClipboardFormatListener failed");
-        return -1;
-      }
-      log_info("Clipboard listener registered");
-      return 0;
-    case WM_CLIPBOARDUPDATE:
-      handle_clipboard_update(hwnd);
-      return 0;
-    case WM_DESTROY:
-      RemoveClipboardFormatListener(hwnd);
-      PostQuitMessage(0);
-      log_info("Shutting down");
-      return 0;
-    default:
-      return DefWindowProc(hwnd, msg, wParam, lParam);
+  case WM_CREATE:
+    if (!AddClipboardFormatListener(hwnd)) {
+      log_info("AddClipboardFormatListener failed");
+      return -1;
+    }
+    log_info("Clipboard listener registered");
+    return 0;
+  case WM_CLIPBOARDUPDATE:
+    handle_clipboard_update(hwnd);
+    return 0;
+  case WM_DESTROY:
+    RemoveClipboardFormatListener(hwnd);
+    PostQuitMessage(0);
+    log_info("Shutting down");
+    return 0;
+  default:
+    return DefWindowProc(hwnd, msg, wParam, lParam);
   }
 }
 
@@ -362,19 +356,8 @@ int wmain(void) {
     return 1;
   }
 
-  HWND hwnd = CreateWindowExW(
-    WS_EX_TOOLWINDOW,
-    kWindowClassName,
-    L"Clipboard Whitespace Trimmer",
-    WS_POPUP,
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    NULL,
-    NULL,
-    hInstance,
-    NULL);
+  HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClassName, L"Clipboard Whitespace Trimmer", WS_POPUP,
+                              CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, hInstance, NULL);
 
   if (!hwnd) {
     log_info("CreateWindowEx failed (%lu)", GetLastError());

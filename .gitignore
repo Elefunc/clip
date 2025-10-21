@@ -5,6 +5,7 @@ cliptrim64.exe
 *.obj
 *.pdb
 *.ilk
+*.res
 
 # Temporary files
 *.log

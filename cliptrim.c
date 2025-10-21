@@ -12,6 +12,8 @@
 #include <wchar.h>
 #include <wctype.h>
 
+#include "resource.h"
+
 static const wchar_t kWindowClassName[] = L"ClipboardTrimWatcher";
 static bool g_isUpdatingClipboard = false;
 
@@ -350,6 +352,9 @@ int wmain(void) {
   wc.lpfnWndProc = window_proc;
   wc.hInstance = hInstance;
   wc.lpszClassName = kWindowClassName;
+  wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+  wc.hIcon = (HICON) LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
+  wc.hIconSm = (HICON) LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, 16, 16, 0);
 
   if (!RegisterClassExW(&wc)) {
     log_info("RegisterClassEx failed (%lu)", GetLastError());

@@ -1,6 +1,6 @@
-# `cliptrim##.exe` – Repository Guidelines
-
+# `cliptrim.exe` – Repository Guidelines
 ![Cliptrim icon](cliptrim.png)
+
 ## Project Structure & Module Organization
 - `cliptrim.c`: Primary Win32 entry point, message loop, trimming logic, and icon loading. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
 - `cliptrim.rc`: Resource script linking `cliptrim.ico` as the main application icon; update IDs here when adding resources.

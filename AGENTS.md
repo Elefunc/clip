@@ -1,6 +1,8 @@
 # `cliptrim.exe` – Repository Guidelines
 ![Cliptrim icon](cliptrim.png)
 
+> Maintained by **Elefunc, Inc.** · https://elefunc.com
+
 ## Project Structure & Module Organization
 - `cliptrim.c`: Primary Win32 entry point, message loop, trimming logic, and icon loading. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
 - `cliptrim.rc`: Resource script linking `cliptrim.ico` as the main application icon; update IDs here when adding resources.
@@ -32,3 +34,7 @@
 - On Ubuntu 24.04, install the toolchain via `sudo apt install mingw-w64` before running `make`.
 - Avoid adding compiled binaries to version control. Update `.gitignore` if new build artifacts emerge.
 - When editing, prefer `apply_patch` or targeted diffs to keep reviews small and traceable.
+
+---
+
+Cliptrim is an Elefunc, Inc. project — reach us at https://elefunc.com for support or partnership inquiries.

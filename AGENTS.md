@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `clipboard_trim.c`: Primary Win32 entry point, message loop, and trimming logic. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
+- `cliptrim.c`: Primary Win32 entry point, message loop, and trimming logic. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
 - `Makefile`: Cross-build orchestration. Targets `cliptrim32.exe` and `cliptrim64.exe` with shared warning flags. Add new source files via the `SRC` variable before introducing subdirectories.
 
 ## Build, Test, and Development Commands
@@ -10,7 +10,7 @@
 - `wine cliptrim64.exe` (optional): Quick smoke test on Linux hosts with Wine; confirm console logs appear and clipboard updates succeed.
 
 ## Coding Style & Naming Conventions
-- Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 4-space indentation and brace-on-same-line style already present in `clipboard_trim.c`.
+- Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 4-space indentation and brace-on-same-line style already present in `cliptrim.c`.
 - Prefer descriptive static helpers (e.g., `handle_clipboard_update`) and snake_case identifiers.
 - Log messages should remain concise, capitalized, and timestamp-friendly to preserve console readability.
 

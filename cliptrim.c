@@ -172,12 +172,7 @@ static TrimmedBuffer trim_lines_preserving_breaks(const wchar_t* input, size_t l
       lineEnd++;
     }
 
-    size_t trimStart = lineStart;
-    while (trimStart < lineEnd && iswspace(input[trimStart]) && input[trimStart] != L'\r' &&
-           input[trimStart] != L'\n') {
-      trimStart++;
-    }
-
+    size_t trimStart = lineStart; // keep leading whitespace intact
     size_t trimEnd = lineEnd;
     while (trimEnd > trimStart && iswspace(input[trimEnd - 1]) && input[trimEnd - 1] != L'\r' &&
            input[trimEnd - 1] != L'\n') {
@@ -190,7 +185,7 @@ static TrimmedBuffer trim_lines_preserving_breaks(const wchar_t* input, size_t l
       lineCount++;
     }
 
-    size_t removed = (trimStart - lineStart) + (lineEnd - trimEnd);
+    size_t removed = lineEnd - trimEnd;
     if (removed > 0) {
       linesTouched++;
       whitespaceRemoved += removed;

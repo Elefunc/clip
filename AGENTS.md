@@ -1,4 +1,4 @@
-# Repository Guidelines
+# `cliptrim##.exe` – Repository Guidelines
 
 ![Cliptrim icon](cliptrim.png)
 ## Project Structure & Module Organization

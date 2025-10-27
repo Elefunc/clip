@@ -11,10 +11,10 @@ CFLAGS_COMMON := -std=c11 -Wall -Wextra -Wpedantic -O2 -flto -municode -fno-asyn
 LDFLAGS := -Wl,-s -Wl,--gc-sections -flto -luser32 -lwinmm
 RCFLAGS := --codepage=65001 -O coff
 
-TARGET64 := cliptrim64.exe
-TARGET32 := cliptrim32.exe
-RES64 := cliptrim64.res
-RES32 := cliptrim32.res
+TARGET64 := trim64.exe
+TARGET32 := trim32.exe
+RES64 := trim64.res
+RES32 := trim32.res
 
 all: $(TARGET64) $(TARGET32)
 

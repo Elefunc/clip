@@ -14,7 +14,7 @@
 
 #include <mmsystem.h>
 
-#include "resource.h"
+#include "trim.h"
 
 #define WM_APP_EXIT (WM_APP + 1)
 #define SINGLE_INSTANCE_MUTEX_NAME L"Local\\CliptrimSingleton"

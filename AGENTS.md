@@ -1,12 +1,12 @@
 # Trim & Paste – Repository Guidelines
-![Cliptrim icon](trim/cliptrim.png)
+![Clip icon](trim/trim.png)
 
 > Maintained by **Elefunc, Inc.** · https://elefunc.com
 
 ## Project Structure & Module Organization
-- `trim/cliptrim.c`: Primary Win32 entry point, message loop, trimming logic, and icon loading. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
-- `trim/cliptrim.rc`: Resource script linking `trim/cliptrim.ico` as the main application icon; update IDs here when adding resources.
-- `trim/cliptrim.ico`: Multi-resolution icon generated from `trim/cliptrim.png`; update via `convert trim/cliptrim.png -define icon:auto-resize=256,128,64,48,32,16 trim/cliptrim.ico`.
+- `trim/trim.c`: Primary Win32 entry point, message loop, trimming logic, and icon loading. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
+- `trim/trim.rc`: Resource script linking `trim/trim.ico` as the main application icon; update IDs here when adding resources.
+- `trim/trim.ico`: Multi-resolution icon generated from `trim/trim.png`; update via `convert trim/trim.png -define icon:auto-resize=256,128,64,48,32,16 trim/trim.ico`.
 - `trim/Makefile`: Cross-build orchestration. Targets `trim32.exe` and `trim64.exe` with shared warning flags and resource compilation. Add new source files via the `SRC` variable before introducing subdirectories.
 - `paste/paste.c`: Win32 console utility that emits clipboard text (UTF-8) or images (PNG) to stdout. Keep clipboard-specific helpers local until the feature set justifies additional files.
 - `paste/paste.rc`: Version resource metadata compiled into both paste binaries. Update here when bumping versions or changing company/product strings.
@@ -21,10 +21,10 @@
 - `./paste/paste64.exe --text` (optional): Validate text clipboard capture on Windows or WSL->Windows clipboard; append `--image` and redirect stdout to verify PNG output.
 
 ## Coding Style & Naming Conventions
-- Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 2-space indentation and brace-on-same-line style already present in `cliptrim.c`.
+- Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 2-space indentation and brace-on-same-line style already present in `trim.c`.
 - Prefer descriptive static helpers (e.g., `handle_clipboard_update`) and snake_case identifiers.
 - Log messages should remain concise, capitalized, and timestamp-friendly to preserve console readability.
-- Run `clang-format -i trim/cliptrim.c` before committing; configuration lives in `.clang-format`.
+- Run `clang-format -i trim/trim.c` before committing; configuration lives in `.clang-format`.
 
 ## Testing Guidelines
 - No automated tests yet. After building, validate manually on Windows by running `trim/trim64.exe`, then issuing `echo "  sample text  " | clip` to confirm whitespace trimming and log output.
@@ -37,7 +37,7 @@
 
 ## Release Checklist
 1. **Update version references**
-   - Edit `trim/cliptrim.rc` and bump `FILEVERSION`, `PRODUCTVERSION`, and the `StringFileInfo` `FileVersion`/`ProductVersion` strings to the new semantic version (e.g., `0.5.2`).
+   - Edit `trim/trim.rc` and bump `FILEVERSION`, `PRODUCTVERSION`, and the `StringFileInfo` `FileVersion`/`ProductVersion` strings to the new semantic version (e.g., `0.5.2`).
    - Regenerate the build after editing to refresh `trim/trim32.res`/`trim/trim64.res`.
    - Commit the change with a message like `Bump version to 0.x.y` and push it upstream.
 2. **Make a clean build**

@@ -1,6 +1,6 @@
-SRC := cliptrim.c
-RC := cliptrim.rc
-ICO := cliptrim.ico
+SRC := trim.c
+RC := trim.rc
+ICO := trim.ico
 
 CC64 := x86_64-w64-mingw32-gcc
 CC32 := i686-w64-mingw32-gcc

@@ -17,7 +17,7 @@
 #include "trim.h"
 
 #define WM_APP_EXIT (WM_APP + 1)
-#define SINGLE_INSTANCE_MUTEX_NAME L"Local\\CliptrimSingleton"
+#define SINGLE_INSTANCE_MUTEX_NAME L"Local\\ClipTrimSingleton"
 
 static const wchar_t kWindowClassName[] = L"ClipboardTrimWatcher";
 static bool g_isUpdatingClipboard = false;
@@ -384,7 +384,7 @@ int wmain(void) {
   SetConsoleOutputCP(CP_UTF8);
   log_info("\xC2\xA9 2025 Elefunc, Inc. All rights reserved.");
   log_info("https://elefunc.com");
-  log_info("Starting Cliptrim clipboard whitespace trimmer");
+  log_info("Starting ClipTrim clipboard whitespace trimmer");
 
   g_singleInstanceMutex = CreateMutexW(NULL, FALSE, SINGLE_INSTANCE_MUTEX_NAME);
   if (!g_singleInstanceMutex) {

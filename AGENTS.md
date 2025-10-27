@@ -8,11 +8,15 @@
 - `cliptrim.rc`: Resource script linking `cliptrim.ico` as the main application icon; update IDs here when adding resources.
 - `cliptrim.ico`: Multi-resolution icon generated from `cliptrim.png`; update via `convert cliptrim.png -define icon:auto-resize=256,128,64,48,32,16 cliptrim.ico`.
 - `Makefile`: Cross-build orchestration. Targets `cliptrim32.exe` and `cliptrim64.exe` with shared warning flags and resource compilation. Add new source files via the `SRC` variable before introducing subdirectories.
+- `paste/paste.c`: Win32 console utility that emits clipboard text (UTF-8) or images (PNG) to stdout. Keep clipboard-specific helpers local until the feature set justifies additional files.
+- `paste/Makefile`: Dedicated build script for `paste32.exe` and `paste64.exe`, sharing warning flags and link settings with the top-level build.
 
 ## Build, Test, and Development Commands
-- `make`: Builds both 32-bit and 64-bit executables using mingw-w64 cross-compilers. Outputs land in the repository root.
-- `make clean`: Removes generated executables. Run before committing to keep the repo binary-free.
+- `make`: Builds both Cliptrim executables using mingw-w64 cross-compilers. Outputs land in the repository root.
+- `make clean`: Removes generated Cliptrim artifacts. Run before committing to keep the repo binary-free.
+- `make -C paste`: Builds `paste64.exe` and `paste32.exe` with the same toolchain defaults. Pair with `make -C paste clean` when tidying the workspace.
 - `wine cliptrim64.exe` (optional): Quick smoke test on Linux hosts with Wine; confirm console logs appear and clipboard updates succeed.
+- `./paste/paste64.exe --text` (optional): Validate text clipboard capture on Windows or WSL->Windows clipboard; append `--image` and redirect stdout to verify PNG output.
 
 ## Coding Style & Naming Conventions
 - Target C11 (`-std=c11`) with UTF-16 Windows APIs. Maintain 2-space indentation and brace-on-same-line style already present in `cliptrim.c`.
@@ -39,8 +43,8 @@
    - Run `make` to rebuild `cliptrim32.exe` and `cliptrim64.exe`; confirm both executables are produced without warnings.
 3. **Make a GitHub release**
    - Tag the release (`git tag -a v0.x.y -m "Cliptrim 0.x.y"` and `git push origin v0.x.y`).
-   - Publish it with the CLI: `gh release create v0.x.y cliptrim64.exe cliptrim32.exe --title "Cliptrim 0.x.y" --notes "<bullet summary + checks>"`.
-   - Double-check the release page to ensure both executables and notes rendered correctly.
+   - Publish it with the CLI: `gh release create v0.x.y cliptrim64.exe cliptrim32.exe paste/paste64.exe paste/paste32.exe --title "Cliptrim 0.x.y" --notes "<bullet summary + checks>"`.
+   - Double-check the release page to ensure all four executables and notes rendered correctly.
 
 ## Agent Notes & Environment
 - Cross-compilers (`x86_64-w64-mingw32-gcc`, `i686-w64-mingw32-gcc`) are expected locally; verify versions before onboarding.

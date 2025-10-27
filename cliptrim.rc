@@ -4,8 +4,8 @@
 IDI_APP ICON "cliptrim.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,5,1,0
- PRODUCTVERSION 0,5,1,0
+ FILEVERSION 0,6,0,0
+ PRODUCTVERSION 0,6,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -18,12 +18,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Elefunc, Inc.\0"
             VALUE "FileDescription", "Cliptrim Clipboard Whitespace Trimmer\0"
-            VALUE "FileVersion", "0.5.1\0"
+            VALUE "FileVersion", "0.6.0\0"
             VALUE "InternalName", "cliptrim\0"
             VALUE "LegalCopyright", "Copyright © 2025 Elefunc, Inc.\0"
             VALUE "OriginalFilename", "cliptrim.exe\0"
             VALUE "ProductName", "Cliptrim Clipboard Whitespace Trimmer\0"
-            VALUE "ProductVersion", "0.5.1\0"
+            VALUE "ProductVersion", "0.6.0\0"
             VALUE "Website", "https://elefunc.com\0"
         END
     END

@@ -6,6 +6,7 @@
 ## Project Structure & Module Organization
 - `trim/trim.c`: Primary Win32 entry point, message loop, trimming logic, and icon loading. Keep platform-specific code here and prefer static helpers over new translation units until complexity demands otherwise.
 - `trim/trim.rc`: Resource script linking `trim/trim.ico` as the main application icon; update IDs here when adding resources.
+- `trim/trim.h`: Shared resource identifiers consumed by both the resource script and the C runtime.
 - `trim/trim.ico`: Multi-resolution icon generated from `trim/trim.png`; update via `convert trim/trim.png -define icon:auto-resize=256,128,64,48,32,16 trim/trim.ico`.
 - `trim/Makefile`: Cross-build orchestration. Targets `trim32.exe` and `trim64.exe` with shared warning flags and resource compilation. Add new source files via the `SRC` variable before introducing subdirectories.
 - `paste/paste.c`: Win32 console utility that emits clipboard text (UTF-8) or images (PNG) to stdout. Keep clipboard-specific helpers local until the feature set justifies additional files.

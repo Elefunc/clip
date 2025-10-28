@@ -259,11 +259,17 @@ static bool emit_clipboard_text_utf8(void) {
     return false;
   }
 
-  size_t length = wcslen(locked);
+  const wchar_t* text = locked;
+  size_t length = wcslen(text);
+  if (length > 0 && text[0] == 0xFEFF) {
+    // Skip BOM so stdout starts with user-visible content.
+    ++text;
+    --length;
+  }
   size_t bytesWritten = 0;
 
   if (length > 0) {
-    int required = WideCharToMultiByte(CP_UTF8, 0, locked, (int) length, NULL, 0, NULL, NULL);
+    int required = WideCharToMultiByte(CP_UTF8, 0, text, (int) length, NULL, 0, NULL, NULL);
     if (required <= 0) {
       log_line("ERROR", "WideCharToMultiByte sizing failed (%lu)", (unsigned long) GetLastError());
       GlobalUnlock(handle);
@@ -277,7 +283,7 @@ static bool emit_clipboard_text_utf8(void) {
       return false;
     }
 
-    int converted = WideCharToMultiByte(CP_UTF8, 0, locked, (int) length, buffer, required, NULL, NULL);
+    int converted = WideCharToMultiByte(CP_UTF8, 0, text, (int) length, buffer, required, NULL, NULL);
     GlobalUnlock(handle);
     if (converted <= 0) {
       log_line("ERROR", "WideCharToMultiByte failed (%lu)", (unsigned long) GetLastError());

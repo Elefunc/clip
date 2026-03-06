@@ -15,8 +15,10 @@
   - `Makefile`: Cross-build orchestration. Targets `trim32.exe` and `trim64.exe`, builds vendored PCRE2 objects under `trim/obj/`, and signs rebuilt executables. Add new source files via the declared source variables before introducing more build indirection.
 - `paste/`
   - `paste.c`: Win32 console utility that emits clipboard text (UTF-8) or images (PNG) to stdout. Keep clipboard-specific helpers local until the feature set justifies additional files.
-  - `paste.rc`: Version resource metadata compiled into both paste binaries. Update here when bumping versions, changing company/product strings, or rolling the copyright year.
-  - `Makefile`: Dedicated build script for `paste32.exe` and `paste64.exe`, storing intermediate objects under `paste/obj/` while leaving the executables in place.
+  - `paste.rc`: Resource script embedding `paste/paste.ico` as the application icon alongside version metadata; update here when bumping versions, changing company/product strings, or rolling the copyright year.
+  - `paste.ico`: Multi-resolution icon generated from `paste/paste.png`; update via `convert paste/paste.png -define icon:auto-resize=256,128,64,48,32,16 paste/paste.ico`.
+  - `paste.png`: Source artwork for the Paste application icon—regenerate `.ico` variants from this PNG.
+  - `Makefile`: Dedicated build script for `paste32.exe` and `paste64.exe`, storing intermediate objects under `paste/obj/`, leaving the executables in place, and rebuilding resources when `paste.ico` changes.
 
 ## Build, Test, and Development Commands
 - `cd trim && make`: Builds both Trim executables using mingw-w64 cross-compilers, compiles the vendored PCRE2 sources, and automatically code-signs any rebuilt `.exe` outputs with `cs`. Outputs land inside the `trim` directory.

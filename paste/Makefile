@@ -1,5 +1,6 @@
 SRC := paste.c
 RC := paste.rc
+ICON := paste.ico
 OBJDIR := obj
 
 CC64 := x86_64-w64-mingw32-gcc
@@ -41,10 +42,10 @@ $(OBJ32): $(SRC) | $(OBJDIR)
 $(OBJDIR):
 	mkdir -p $@
 
-$(RES64): $(RC)
+$(RES64): $(RC) $(ICON)
 	$(RC64) $(RCFLAGS) $(RC) -o $@
 
-$(RES32): $(RC)
+$(RES32): $(RC) $(ICON)
 	$(RC32) $(RCFLAGS) $(RC) -o $@
 
 clean:

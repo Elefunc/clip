@@ -59,8 +59,8 @@
    - Run `osslsigncode verify -in <file>` for each signed executable.
    - If the local Linux CA bundle does not include Microsoft identity-verification roots, pass a PEM bundle with `-CAfile` and `-TSA-CAfile` so `osslsigncode` can validate the signing and timestamp chains.
 4. **Make a GitHub release**
-   - Tag the release (`git tag -a v0.x.y -m "Cliptrim 0.x.y"` and `git push origin v0.x.y`).
-   - Publish it with the CLI: `gh release create v0.x.y trim/trim64.exe trim/trim32.exe paste/paste64.exe paste/paste32.exe --title "Cliptrim 0.x.y" --notes "<bullet summary + checks>"`.
+   - Tag the release (`git tag -a v0.x.y -m "Clip 0.x.y"` and `git push origin v0.x.y`).
+   - Publish it with the CLI: `gh release create v0.x.y trim/trim64.exe trim/trim32.exe paste/paste64.exe paste/paste32.exe --title "Clip 0.x.y" --notes "<bullet summary + checks>"`.
    - Double-check the release page to ensure all four signed executables and notes rendered correctly.
 
 ## Agent Notes & Environment
@@ -79,4 +79,4 @@
 
 ---
 
-Cliptrim is an Elefunc, Inc. project — reach us at https://elefunc.com for support.
+Clip is an Elefunc, Inc. project — reach us at https://elefunc.com for support.

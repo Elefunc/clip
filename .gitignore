@@ -2,10 +2,15 @@
 cliptrim32.exe
 cliptrim64.exe
 *.exe
+*.o
 *.obj
 *.pdb
 *.ilk
 *.res
+obj/
+
+# Local runtime config
+trim/trim.rules
 
 # Temporary files
 *.log

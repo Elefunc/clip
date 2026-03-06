@@ -1,0 +1,30 @@
+# Copy this file to `trim.rules` in the launch directory to override the
+# executable-side default. If neither location has a config, ClipTrim generates
+# this default rule beside `trim.exe` on first launch.
+# Syntax:
+# - Start each replacement with `rule`.
+# - Add one or more `pattern <<TOKEN` blocks; each block body is a PCRE2 regexp.
+# - Add exactly one `replace <<TOKEN` block; its body is the literal replacement.
+# - A block ends when a line exactly matches `TOKEN`.
+# - Block bodies do not include the terminator line break.
+# - Add a blank line before `TOKEN` if you need the replacement to end with a newline.
+# Rules run in file order. Patterns inside one rule share the same replacement.
+
+# Default rule: strip a leading quote marker from the full clipboard string.
+rule
+pattern <<EOF
+\A›
+EOF
+pattern <<EOF
+\A»
+EOF
+replace <<EOF
+EOF
+
+# Default rule: trim the same trailing whitespace set the pre-regex trimmer used.
+rule
+pattern <<EOF
+[ \t\f\x0B\x{00A0}\x{1680}\x{180E}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}]+(?=\r\n?|\n|\z)
+EOF
+replace <<EOF
+EOF

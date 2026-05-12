@@ -21,6 +21,7 @@
 #include <commctrl.h>
 #include <d2d1.h>
 #include <d2derr.h>
+#include <dwrite.h>
 #include <objbase.h>
 #include <wincodec.h>
 
@@ -48,16 +49,24 @@
 #endif
 
 #define ARRAY_COUNT(value) (sizeof(value) / sizeof((value)[0]))
-#define WM_APP_REFRESH (WM_APP + 1)
+#define WM_APP_EXIT (WM_APP + 1)
 #define IDC_TEXT_VIEW 1001
 #define IMAGE_ZOOM_MIN 0.01
 #define IMAGE_ZOOM_MAX 2.0
+#define IMAGE_CHECKER_CELL_SIZE 8
+#define IMAGE_CHECKER_TILE_SIZE (IMAGE_CHECKER_CELL_SIZE * 2)
 #define WINDOW_MIN_WIDTH 200
 #define WINDOW_MIN_HEIGHT 140
 #define TEXT_FONT_FAMILY_COUNT 3
+#define TEXT_LAYOUT_MAX_SIZE 1000000.0f
+#define TEXT_AUTOSCROLL_TIMER 1
+#define TEXT_AUTOSCROLL_INTERVAL_MS 40
+#define TEXT_ZOOM_MIN 0.1
+#define TEXT_ZOOM_MAX IMAGE_ZOOM_MAX
 
 static const wchar_t kAppTitle[] = L"Board";
 static const wchar_t kWindowClassName[] = L"ClipBoardViewerWindow";
+static const wchar_t kTextViewClassName[] = L"ClipBoardTextView";
 static const wchar_t kImageViewClassName[] = L"ClipBoardImageView";
 static const wchar_t kSingleInstanceMutexName[] = L"Local\\ClipBoardViewerSingleton";
 static const wchar_t* const kTextFontFamilies[TEXT_FONT_FAMILY_COUNT] = {L"Cascadia Code", L"Cascadia Mono",
@@ -89,19 +98,35 @@ static HWND g_imageView = NULL;
 static HANDLE g_singleInstanceMutex = NULL;
 static bool g_clipboardListenerRegistered = false;
 static HFONT g_uiFont = NULL;
-static HFONT g_textFont = NULL;
+static IDWriteTextFormat* g_textFormat = NULL;
 static bool g_textFontAvailable[TEXT_FONT_FAMILY_COUNT] = {false};
 static size_t g_textFontSelected = TEXT_FONT_FAMILY_COUNT - 1;
 static wchar_t g_textTooltipText[512] = L"";
 static UINT g_currentDpi = USER_DEFAULT_SCREEN_DPI;
+static int g_textScrollX = 0;
+static int g_textScrollY = 0;
+static UINT32 g_textSelectionAnchor = 0;
+static UINT32 g_textSelectionCaret = 0;
+static bool g_textSelecting = false;
+static int g_textWheelRemainder = 0;
+static int g_textHWheelRemainder = 0;
+static double g_textZoom = 1.0;
 static bool g_imageZoomExplicit = false;
 static double g_imageZoom = 1.0;
 static DWORD g_clipboardSequence = 0;
 static bool g_comInitialized = false;
 static ID2D1Factory* g_d2dFactory = NULL;
+static IDWriteFactory* g_dwriteFactory = NULL;
 static IWICImagingFactory* g_wicFactory = NULL;
+static ID2D1HwndRenderTarget* g_textRenderTarget = NULL;
+static ID2D1SolidColorBrush* g_textBrush = NULL;
+static ID2D1SolidColorBrush* g_textSelectionBrush = NULL;
+static ID2D1SolidColorBrush* g_textSelectionTextBrush = NULL;
+static IDWriteTextLayout* g_textLayout = NULL;
 static ID2D1HwndRenderTarget* g_imageRenderTarget = NULL;
 static ID2D1Bitmap* g_imageBitmap = NULL;
+static ID2D1BitmapBrush* g_imageCheckerBrush = NULL;
+static const IID kIID_IDWriteFactory = {0xb859ee5a, 0xd838, 0x4b5b, {0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48}};
 
 typedef BOOL(WINAPI* SetProcessDpiAwarenessContextFn)(DPI_AWARENESS_CONTEXT);
 typedef HRESULT(WINAPI* SetProcessDpiAwarenessFn)(int);
@@ -304,18 +329,47 @@ static const wchar_t* selected_text_font_family(void) {
                                                                        : TEXT_FONT_FAMILY_COUNT - 1];
 }
 
-static HFONT create_text_font(UINT dpi) {
-  int height = -MulDiv(9, (int) (dpi ? dpi : USER_DEFAULT_SCREEN_DPI), 72);
-  return CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, selected_text_font_family());
+static FLOAT text_font_size_for_dpi(UINT dpi) {
+  return (FLOAT) ((double) MulDiv(9, (int) (dpi ? dpi : USER_DEFAULT_SCREEN_DPI), 72) * g_textZoom);
 }
 
 static HFONT ui_font(void) {
   return g_uiFont ? g_uiFont : (HFONT) GetStockObject(DEFAULT_GUI_FONT);
 }
 
-static HFONT text_font(void) {
-  return g_textFont ? g_textFont : (HFONT) GetStockObject(ANSI_FIXED_FONT);
+static void release_text_layout(void) {
+  if (g_textLayout) {
+    IDWriteTextLayout_Release(g_textLayout);
+    g_textLayout = NULL;
+  }
+}
+
+static void release_text_format(void) {
+  release_text_layout();
+  if (g_textFormat) {
+    IDWriteTextFormat_Release(g_textFormat);
+    g_textFormat = NULL;
+  }
+}
+
+static bool create_text_format(void) {
+  release_text_format();
+  if (!g_dwriteFactory) {
+    return false;
+  }
+
+  HRESULT hr = IDWriteFactory_CreateTextFormat(
+      g_dwriteFactory, selected_text_font_family(), NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+      DWRITE_FONT_STRETCH_NORMAL, text_font_size_for_dpi(g_currentDpi), L"", &g_textFormat);
+  if (FAILED(hr)) {
+    return false;
+  }
+
+  IDWriteTextFormat_SetWordWrapping(g_textFormat, DWRITE_WORD_WRAPPING_NO_WRAP);
+  IDWriteTextFormat_SetTextAlignment(g_textFormat, DWRITE_TEXT_ALIGNMENT_LEADING);
+  IDWriteTextFormat_SetParagraphAlignment(g_textFormat, DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+  IDWriteTextFormat_SetIncrementalTabStop(g_textFormat, (FLOAT) scale_for_dpi(32, g_currentDpi));
+  return true;
 }
 
 static void refresh_text_tooltip(HWND hwnd) {
@@ -367,24 +421,25 @@ static void recreate_fonts_for_dpi(UINT dpi) {
     DeleteObject(g_uiFont);
     g_uiFont = NULL;
   }
-  if (g_textFont) {
-    DeleteObject(g_textFont);
-    g_textFont = NULL;
-  }
 
   g_currentDpi = dpi ? dpi : USER_DEFAULT_SCREEN_DPI;
   g_uiFont = create_ui_font(g_currentDpi);
   refresh_text_font_choice();
-  g_textFont = create_text_font(g_currentDpi);
 }
 
 static void recreate_fonts(HWND hwnd) {
   recreate_fonts_for_dpi(dpi_for_window(hwnd));
 }
 
+static void clamp_text_scroll(HWND hwnd);
+
 static void apply_text_font(void) {
+  create_text_format();
   if (g_textView) {
-    SendMessageW(g_textView, WM_SETFONT, (WPARAM) text_font(), TRUE);
+    if (g_snapshot.type == CLIPBOARD_CONTENT_TEXT) {
+      clamp_text_scroll(g_textView);
+    }
+    InvalidateRect(g_textView, NULL, TRUE);
   }
 }
 
@@ -392,10 +447,6 @@ static void free_fonts(void) {
   if (g_uiFont) {
     DeleteObject(g_uiFont);
     g_uiFont = NULL;
-  }
-  if (g_textFont) {
-    DeleteObject(g_textFont);
-    g_textFont = NULL;
   }
 }
 
@@ -752,6 +803,16 @@ static double clamp_image_zoom(double zoom) {
   return zoom;
 }
 
+static double clamp_text_zoom(double zoom) {
+  if (zoom < TEXT_ZOOM_MIN) {
+    return TEXT_ZOOM_MIN;
+  }
+  if (zoom > TEXT_ZOOM_MAX) {
+    return TEXT_ZOOM_MAX;
+  }
+  return zoom;
+}
+
 static void reset_image_view_state(void) {
   g_imageZoomExplicit = false;
   g_imageZoom = 1.0;
@@ -826,6 +887,12 @@ static double displayed_image_zoom(HWND hwnd) {
 }
 
 static void current_status_text(HWND hwnd, wchar_t* status, size_t statusCount) {
+  if (g_snapshot.type == CLIPBOARD_CONTENT_TEXT) {
+    int percent = (int) (g_textZoom * 100.0 + 0.5);
+    format_text(status, statusCount, L"%ls - %d%%", g_snapshot.status, percent);
+    return;
+  }
+
   if (g_snapshot.type != CLIPBOARD_CONTENT_IMAGE) {
     set_text(status, statusCount, g_snapshot.status);
     return;
@@ -873,6 +940,445 @@ static void layout_children(HWND hwnd) {
   }
 }
 
+static int text_padding_x(HWND hwnd) {
+  return scale_for_window(hwnd, 4);
+}
+
+static int text_padding_y(HWND hwnd) {
+  return scale_for_window(hwnd, 3);
+}
+
+static UINT32 text_layout_length(void) {
+  if (g_snapshot.type != CLIPBOARD_CONTENT_TEXT || !g_snapshot.text || g_snapshot.textLength == 0) {
+    return 0;
+  }
+  return g_snapshot.textLength > UINT32_MAX ? UINT32_MAX : (UINT32) g_snapshot.textLength;
+}
+
+static int float_extent_to_int(FLOAT value) {
+  if (value <= 0.0f) {
+    return 0;
+  }
+  if (value >= (FLOAT) INT_MAX) {
+    return INT_MAX;
+  }
+  return (int) (value + 0.999f);
+}
+
+static bool ensure_text_layout(HWND hwnd) {
+  (void) hwnd;
+  if (g_textLayout) {
+    return true;
+  }
+  if (!g_dwriteFactory) {
+    return false;
+  }
+  if (!g_textFormat && !create_text_format()) {
+    return false;
+  }
+
+  const wchar_t* text = g_snapshot.type == CLIPBOARD_CONTENT_TEXT && g_snapshot.text ? g_snapshot.text : L"";
+  UINT32 length = text_layout_length();
+  HRESULT hr = IDWriteFactory_CreateTextLayout(g_dwriteFactory, text, length, g_textFormat, TEXT_LAYOUT_MAX_SIZE,
+                                               TEXT_LAYOUT_MAX_SIZE, &g_textLayout);
+  return SUCCEEDED(hr);
+}
+
+static bool text_layout_metrics(HWND hwnd, DWRITE_TEXT_METRICS* metrics) {
+  if (!metrics) {
+    return false;
+  }
+  memset(metrics, 0, sizeof(*metrics));
+  if (!ensure_text_layout(hwnd)) {
+    return false;
+  }
+  return SUCCEEDED(IDWriteTextLayout_GetMetrics(g_textLayout, metrics));
+}
+
+static int text_line_height(HWND hwnd) {
+  if (ensure_text_layout(hwnd)) {
+    DWRITE_LINE_METRICS line = {0};
+    UINT32 count = 0;
+    if (SUCCEEDED(IDWriteTextLayout_GetLineMetrics(g_textLayout, &line, 1, &count)) && count > 0 &&
+        line.height > 0.0f) {
+      return max(float_extent_to_int(line.height), 1);
+    }
+  }
+  return max(scale_for_window(hwnd, 16), 1);
+}
+
+static int text_char_width(HWND hwnd) {
+  return max(rounded_dimension((double) scale_for_window(hwnd, 8) * g_textZoom), 1);
+}
+
+static void text_content_size(HWND hwnd, int* width, int* height) {
+  DWRITE_TEXT_METRICS metrics;
+  bool haveMetrics = text_layout_metrics(hwnd, &metrics);
+  FLOAT textWidth = haveMetrics ? max(metrics.width, metrics.widthIncludingTrailingWhitespace) : 0.0f;
+  FLOAT textHeight = haveMetrics ? metrics.height : 0.0f;
+  if (width) {
+    *width = float_extent_to_int(textWidth) + 2 * text_padding_x(hwnd);
+  }
+  if (height) {
+    *height = float_extent_to_int(textHeight) + 2 * text_padding_y(hwnd);
+  }
+}
+
+static void text_max_scroll(HWND hwnd, int* maxX, int* maxY) {
+  RECT client;
+  GetClientRect(hwnd, &client);
+  int clientWidth = max(client.right - client.left, 0);
+  int clientHeight = max(client.bottom - client.top, 0);
+  int contentWidth = 0;
+  int contentHeight = 0;
+  text_content_size(hwnd, &contentWidth, &contentHeight);
+  if (maxX) {
+    *maxX = max(contentWidth - clientWidth, 0);
+  }
+  if (maxY) {
+    *maxY = max(contentHeight - clientHeight, 0);
+  }
+}
+
+static void update_text_scrollbars(HWND hwnd) {
+  if (!hwnd) {
+    return;
+  }
+
+  RECT client;
+  GetClientRect(hwnd, &client);
+  int clientWidth = max(client.right - client.left, 0);
+  int clientHeight = max(client.bottom - client.top, 0);
+  int contentWidth = 0;
+  int contentHeight = 0;
+  text_content_size(hwnd, &contentWidth, &contentHeight);
+
+  SCROLLINFO si = {0};
+  si.cbSize = sizeof(si);
+  si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+  si.nMin = 0;
+  si.nMax = max(contentHeight - 1, 0);
+  si.nPage = (UINT) clientHeight;
+  si.nPos = g_textScrollY;
+  SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+
+  si.nMax = max(contentWidth - 1, 0);
+  si.nPage = (UINT) clientWidth;
+  si.nPos = g_textScrollX;
+  SetScrollInfo(hwnd, SB_HORZ, &si, TRUE);
+}
+
+static bool set_text_scroll(HWND hwnd, int x, int y) {
+  int maxX = 0;
+  int maxY = 0;
+  text_max_scroll(hwnd, &maxX, &maxY);
+  x = min(max(x, 0), maxX);
+  y = min(max(y, 0), maxY);
+  bool changed = x != g_textScrollX || y != g_textScrollY;
+  g_textScrollX = x;
+  g_textScrollY = y;
+  update_text_scrollbars(hwnd);
+  if (changed) {
+    InvalidateRect(hwnd, NULL, TRUE);
+  }
+  return changed;
+}
+
+static void clamp_text_scroll(HWND hwnd) {
+  set_text_scroll(hwnd, g_textScrollX, g_textScrollY);
+}
+
+static void reset_text_view_state(void) {
+  g_textScrollX = 0;
+  g_textScrollY = 0;
+  g_textSelectionAnchor = 0;
+  g_textSelectionCaret = 0;
+  g_textSelecting = false;
+  g_textWheelRemainder = 0;
+  g_textHWheelRemainder = 0;
+  release_text_layout();
+  if (g_textView) {
+    if (g_snapshot.type == CLIPBOARD_CONTENT_TEXT) {
+      update_text_scrollbars(g_textView);
+    } else {
+      SCROLLINFO si = {0};
+      si.cbSize = sizeof(si);
+      si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+      SetScrollInfo(g_textView, SB_VERT, &si, TRUE);
+      SetScrollInfo(g_textView, SB_HORZ, &si, TRUE);
+    }
+    InvalidateRect(g_textView, NULL, TRUE);
+  }
+}
+
+static D2D1_COLOR_F d2d_color_from_colorref(COLORREF color) {
+  D2D1_COLOR_F result = {(FLOAT) GetRValue(color) / 255.0f, (FLOAT) GetGValue(color) / 255.0f,
+                         (FLOAT) GetBValue(color) / 255.0f, 1.0f};
+  return result;
+}
+
+static void release_text_render_target(void) {
+  if (g_textSelectionTextBrush) {
+    ID2D1SolidColorBrush_Release(g_textSelectionTextBrush);
+    g_textSelectionTextBrush = NULL;
+  }
+  if (g_textSelectionBrush) {
+    ID2D1SolidColorBrush_Release(g_textSelectionBrush);
+    g_textSelectionBrush = NULL;
+  }
+  if (g_textBrush) {
+    ID2D1SolidColorBrush_Release(g_textBrush);
+    g_textBrush = NULL;
+  }
+  if (g_textRenderTarget) {
+    ID2D1HwndRenderTarget_Release(g_textRenderTarget);
+    g_textRenderTarget = NULL;
+  }
+}
+
+static bool create_text_brushes(void) {
+  if (!g_textRenderTarget) {
+    return false;
+  }
+
+  D2D1_COLOR_F textColor = d2d_color_from_colorref(GetSysColor(COLOR_WINDOWTEXT));
+  D2D1_COLOR_F selectionColor = d2d_color_from_colorref(GetSysColor(COLOR_HIGHLIGHT));
+  D2D1_COLOR_F selectionTextColor = d2d_color_from_colorref(GetSysColor(COLOR_HIGHLIGHTTEXT));
+  return SUCCEEDED(ID2D1HwndRenderTarget_CreateSolidColorBrush(g_textRenderTarget, &textColor, NULL, &g_textBrush)) &&
+         SUCCEEDED(ID2D1HwndRenderTarget_CreateSolidColorBrush(g_textRenderTarget, &selectionColor, NULL,
+                                                               &g_textSelectionBrush)) &&
+         SUCCEEDED(ID2D1HwndRenderTarget_CreateSolidColorBrush(g_textRenderTarget, &selectionTextColor, NULL,
+                                                               &g_textSelectionTextBrush));
+}
+
+static bool ensure_text_render_target(HWND hwnd) {
+  if (g_textRenderTarget) {
+    return true;
+  }
+  if (!g_d2dFactory || !hwnd) {
+    return false;
+  }
+
+  RECT client;
+  GetClientRect(hwnd, &client);
+  D2D1_SIZE_U pixelSize = {(UINT32) max(client.right - client.left, 1), (UINT32) max(client.bottom - client.top, 1)};
+  D2D1_RENDER_TARGET_PROPERTIES renderProperties = {0};
+  renderProperties.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+  renderProperties.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
+  renderProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_UNKNOWN;
+  renderProperties.dpiX = (FLOAT) USER_DEFAULT_SCREEN_DPI;
+  renderProperties.dpiY = (FLOAT) USER_DEFAULT_SCREEN_DPI;
+  renderProperties.usage = D2D1_RENDER_TARGET_USAGE_NONE;
+  renderProperties.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
+
+  D2D1_HWND_RENDER_TARGET_PROPERTIES hwndProperties = {0};
+  hwndProperties.hwnd = hwnd;
+  hwndProperties.pixelSize = pixelSize;
+  hwndProperties.presentOptions = D2D1_PRESENT_OPTIONS_NONE;
+
+  HRESULT hr =
+      ID2D1Factory_CreateHwndRenderTarget(g_d2dFactory, &renderProperties, &hwndProperties, &g_textRenderTarget);
+  if (FAILED(hr)) {
+    return false;
+  }
+
+  ID2D1HwndRenderTarget_SetDpi(g_textRenderTarget, (FLOAT) USER_DEFAULT_SCREEN_DPI, (FLOAT) USER_DEFAULT_SCREEN_DPI);
+  if (!create_text_brushes()) {
+    release_text_render_target();
+    return false;
+  }
+  return true;
+}
+
+static bool resize_text_render_target(HWND hwnd) {
+  if (!g_textRenderTarget) {
+    return true;
+  }
+
+  RECT client;
+  GetClientRect(hwnd, &client);
+  D2D1_SIZE_U pixelSize = {(UINT32) max(client.right - client.left, 1), (UINT32) max(client.bottom - client.top, 1)};
+  return SUCCEEDED(ID2D1HwndRenderTarget_Resize(g_textRenderTarget, &pixelSize));
+}
+
+static bool text_selection_range(UINT32* start, UINT32* length) {
+  UINT32 textLength = text_layout_length();
+  UINT32 first = min(g_textSelectionAnchor, g_textSelectionCaret);
+  UINT32 last = max(g_textSelectionAnchor, g_textSelectionCaret);
+  first = min(first, textLength);
+  last = min(last, textLength);
+  if (last <= first) {
+    if (start) {
+      *start = first;
+    }
+    if (length) {
+      *length = 0;
+    }
+    return false;
+  }
+  if (start) {
+    *start = first;
+  }
+  if (length) {
+    *length = last - first;
+  }
+  return true;
+}
+
+static UINT32 text_position_from_point(HWND hwnd, int x, int y) {
+  if (!ensure_text_layout(hwnd)) {
+    return 0;
+  }
+
+  FLOAT layoutX = (FLOAT) (x + g_textScrollX - text_padding_x(hwnd));
+  FLOAT layoutY = (FLOAT) (y + g_textScrollY - text_padding_y(hwnd));
+  WINBOOL trailing = FALSE;
+  WINBOOL inside = FALSE;
+  DWRITE_HIT_TEST_METRICS metrics = {0};
+  HRESULT hr = IDWriteTextLayout_HitTestPoint(g_textLayout, layoutX, layoutY, &trailing, &inside, &metrics);
+  if (FAILED(hr)) {
+    return 0;
+  }
+
+  UINT32 position = metrics.textPosition;
+  if (trailing && metrics.length > 0) {
+    position += metrics.length;
+  }
+  return min(position, text_layout_length());
+}
+
+static void update_text_selection_at_point(HWND hwnd, int x, int y, bool extend) {
+  UINT32 position = text_position_from_point(hwnd, x, y);
+  if (!extend) {
+    g_textSelectionAnchor = position;
+  }
+  g_textSelectionCaret = position;
+  InvalidateRect(hwnd, NULL, TRUE);
+}
+
+static void copy_selected_text(HWND hwnd) {
+  UINT32 start = 0;
+  UINT32 length = 0;
+  if (!text_selection_range(&start, &length) || !g_snapshot.text) {
+    return;
+  }
+
+  SIZE_T bytes = ((SIZE_T) length + 1) * sizeof(wchar_t);
+  HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+  if (!handle) {
+    return;
+  }
+
+  wchar_t* dest = (wchar_t*) GlobalLock(handle);
+  if (!dest) {
+    GlobalFree(handle);
+    return;
+  }
+  memcpy(dest, g_snapshot.text + start, (size_t) length * sizeof(wchar_t));
+  dest[length] = L'\0';
+  GlobalUnlock(handle);
+
+  if (!OpenClipboard(hwnd)) {
+    GlobalFree(handle);
+    return;
+  }
+  EmptyClipboard();
+  if (!SetClipboardData(CF_UNICODETEXT, handle)) {
+    GlobalFree(handle);
+  }
+  CloseClipboard();
+}
+
+static void draw_text_selection(HWND hwnd, FLOAT originX, FLOAT originY) {
+  UINT32 start = 0;
+  UINT32 length = 0;
+  if (!text_selection_range(&start, &length) || !g_textLayout || !g_textSelectionBrush) {
+    return;
+  }
+
+  DWRITE_TEXT_METRICS textMetrics;
+  if (!text_layout_metrics(hwnd, &textMetrics) || textMetrics.lineCount == 0) {
+    return;
+  }
+
+  UINT32 capacity = max(textMetrics.lineCount, 1);
+  DWRITE_HIT_TEST_METRICS* metrics = (DWRITE_HIT_TEST_METRICS*) calloc(capacity, sizeof(*metrics));
+  if (!metrics) {
+    return;
+  }
+
+  UINT32 actual = 0;
+  HRESULT hr =
+      IDWriteTextLayout_HitTestTextRange(g_textLayout, start, length, originX, originY, metrics, capacity, &actual);
+  if (hr == E_NOT_SUFFICIENT_BUFFER && actual > capacity) {
+    DWRITE_HIT_TEST_METRICS* larger = (DWRITE_HIT_TEST_METRICS*) realloc(metrics, actual * sizeof(*metrics));
+    if (larger) {
+      metrics = larger;
+      capacity = actual;
+      hr =
+          IDWriteTextLayout_HitTestTextRange(g_textLayout, start, length, originX, originY, metrics, capacity, &actual);
+    }
+  }
+
+  if (SUCCEEDED(hr)) {
+    for (UINT32 i = 0; i < actual; ++i) {
+      if (metrics[i].width <= 0.0f || metrics[i].height <= 0.0f) {
+        continue;
+      }
+      D2D1_RECT_F rect = {metrics[i].left, metrics[i].top, metrics[i].left + metrics[i].width,
+                          metrics[i].top + metrics[i].height};
+      ID2D1HwndRenderTarget_FillRectangle(g_textRenderTarget, &rect, (ID2D1Brush*) g_textSelectionBrush);
+    }
+  }
+  free(metrics);
+}
+
+static void draw_text_view(HWND hwnd) {
+  if (!ensure_text_render_target(hwnd) || !ensure_text_layout(hwnd)) {
+    HDC hdc = GetDC(hwnd);
+    if (hdc) {
+      RECT client;
+      GetClientRect(hwnd, &client);
+      draw_centered_message(hdc, client, L"Unable to display clipboard text.");
+      ReleaseDC(hwnd, hdc);
+    }
+    return;
+  }
+
+  RECT client;
+  GetClientRect(hwnd, &client);
+  D2D1_RECT_F clip = {(FLOAT) client.left, (FLOAT) client.top, (FLOAT) client.right, (FLOAT) client.bottom};
+  D2D1_COLOR_F background = d2d_color_from_colorref(GetSysColor(COLOR_WINDOW));
+  FLOAT originX = (FLOAT) (text_padding_x(hwnd) - g_textScrollX);
+  FLOAT originY = (FLOAT) (text_padding_y(hwnd) - g_textScrollY);
+  D2D1_POINT_2F origin = {originX, originY};
+
+  ID2D1HwndRenderTarget_BeginDraw(g_textRenderTarget);
+  ID2D1HwndRenderTarget_Clear(g_textRenderTarget, &background);
+  ID2D1HwndRenderTarget_PushAxisAlignedClip(g_textRenderTarget, &clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+  draw_text_selection(hwnd, originX, originY);
+
+  UINT32 selectionStart = 0;
+  UINT32 selectionLength = 0;
+  bool hasSelection = text_selection_range(&selectionStart, &selectionLength) && g_textSelectionTextBrush;
+  DWRITE_TEXT_RANGE selectionRange = {selectionStart, selectionLength};
+  if (hasSelection) {
+    IDWriteTextLayout_SetDrawingEffect(g_textLayout, (IUnknown*) g_textSelectionTextBrush, selectionRange);
+  }
+  ID2D1HwndRenderTarget_DrawTextLayout(g_textRenderTarget, origin, g_textLayout, (ID2D1Brush*) g_textBrush,
+                                       D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT | D2D1_DRAW_TEXT_OPTIONS_CLIP);
+  if (hasSelection) {
+    IDWriteTextLayout_SetDrawingEffect(g_textLayout, NULL, selectionRange);
+  }
+
+  ID2D1HwndRenderTarget_PopAxisAlignedClip(g_textRenderTarget);
+  HRESULT hr = ID2D1HwndRenderTarget_EndDraw(g_textRenderTarget, NULL, NULL);
+  if (hr == (HRESULT) D2DERR_RECREATE_TARGET) {
+    release_text_render_target();
+  }
+}
+
 static void release_image_bitmap(void) {
   if (g_imageBitmap) {
     ID2D1Bitmap_Release(g_imageBitmap);
@@ -880,8 +1386,16 @@ static void release_image_bitmap(void) {
   }
 }
 
+static void release_image_checker_brush(void) {
+  if (g_imageCheckerBrush) {
+    ID2D1BitmapBrush_Release(g_imageCheckerBrush);
+    g_imageCheckerBrush = NULL;
+  }
+}
+
 static void release_image_render_target(void) {
   release_image_bitmap();
+  release_image_checker_brush();
   if (g_imageRenderTarget) {
     ID2D1HwndRenderTarget_Release(g_imageRenderTarget);
     g_imageRenderTarget = NULL;
@@ -889,7 +1403,13 @@ static void release_image_render_target(void) {
 }
 
 static void release_graphics_resources(void) {
+  release_text_render_target();
+  release_text_format();
   release_image_render_target();
+  if (g_dwriteFactory) {
+    IDWriteFactory_Release(g_dwriteFactory);
+    g_dwriteFactory = NULL;
+  }
   if (g_wicFactory) {
     IWICImagingFactory_Release(g_wicFactory);
     g_wicFactory = NULL;
@@ -903,6 +1423,12 @@ static void release_graphics_resources(void) {
 static bool initialize_graphics_resources(void) {
   HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void**) &g_d2dFactory);
   if (FAILED(hr)) {
+    return false;
+  }
+
+  hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &kIID_IDWriteFactory, (IUnknown**) &g_dwriteFactory);
+  if (FAILED(hr)) {
+    release_graphics_resources();
     return false;
   }
 
@@ -962,6 +1488,52 @@ static bool resize_image_render_target(HWND hwnd) {
   return SUCCEEDED(ID2D1HwndRenderTarget_Resize(g_imageRenderTarget, &pixelSize));
 }
 
+static bool ensure_image_checker_brush(void) {
+  if (g_imageCheckerBrush) {
+    return true;
+  }
+  if (!g_imageRenderTarget) {
+    return false;
+  }
+
+  uint32_t pixels[IMAGE_CHECKER_TILE_SIZE * IMAGE_CHECKER_TILE_SIZE];
+  for (int y = 0; y < IMAGE_CHECKER_TILE_SIZE; ++y) {
+    for (int x = 0; x < IMAGE_CHECKER_TILE_SIZE; ++x) {
+      bool dark = ((x / IMAGE_CHECKER_CELL_SIZE) + (y / IMAGE_CHECKER_CELL_SIZE)) % 2 != 0;
+      pixels[y * IMAGE_CHECKER_TILE_SIZE + x] = dark ? 0xffc8c8c8u : 0xfff0f0f0u;
+    }
+  }
+
+  D2D1_BITMAP_PROPERTIES bitmapProperties = {0};
+  bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+  bitmapProperties.dpiX = (FLOAT) USER_DEFAULT_SCREEN_DPI;
+  bitmapProperties.dpiY = (FLOAT) USER_DEFAULT_SCREEN_DPI;
+
+  ID2D1Bitmap* tileBitmap = NULL;
+  D2D1_SIZE_U tileSize = {IMAGE_CHECKER_TILE_SIZE, IMAGE_CHECKER_TILE_SIZE};
+  HRESULT hr =
+      ID2D1HwndRenderTarget_CreateBitmap(g_imageRenderTarget, tileSize, pixels,
+                                         IMAGE_CHECKER_TILE_SIZE * sizeof(pixels[0]), &bitmapProperties, &tileBitmap);
+  if (SUCCEEDED(hr)) {
+    D2D1_BITMAP_BRUSH_PROPERTIES brushProperties = {0};
+    brushProperties.extendModeX = D2D1_EXTEND_MODE_WRAP;
+    brushProperties.extendModeY = D2D1_EXTEND_MODE_WRAP;
+    brushProperties.interpolationMode = D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+    hr = g_imageRenderTarget->lpVtbl->Base.CreateBitmapBrush((ID2D1RenderTarget*) g_imageRenderTarget, tileBitmap,
+                                                             &brushProperties, NULL, &g_imageCheckerBrush);
+  }
+
+  if (tileBitmap) {
+    ID2D1Bitmap_Release(tileBitmap);
+  }
+  if (FAILED(hr)) {
+    release_image_checker_brush();
+    return false;
+  }
+  return true;
+}
+
 static bool ensure_d2d_bitmap(HWND hwnd) {
   if (g_imageBitmap) {
     return true;
@@ -1017,6 +1589,21 @@ static RECT fitted_image_rect(int sourceWidth, int sourceHeight, int targetWidth
   return rect;
 }
 
+static void draw_image_background(const RECT* client) {
+  if (!g_imageRenderTarget || !client) {
+    return;
+  }
+
+  if (ensure_image_checker_brush()) {
+    D2D1_RECT_F background = {(FLOAT) client->left, (FLOAT) client->top, (FLOAT) client->right, (FLOAT) client->bottom};
+    ID2D1HwndRenderTarget_FillRectangle(g_imageRenderTarget, &background, (ID2D1Brush*) g_imageCheckerBrush);
+    return;
+  }
+
+  const D2D1_COLOR_F fallback = {0.94f, 0.94f, 0.94f, 1.0f};
+  ID2D1HwndRenderTarget_Clear(g_imageRenderTarget, &fallback);
+}
+
 static void draw_image_view(HWND hwnd) {
   if (!ensure_image_render_target(hwnd)) {
     HDC hdc = GetDC(hwnd);
@@ -1030,10 +1617,14 @@ static void draw_image_view(HWND hwnd) {
   }
 
   if (!ensure_d2d_bitmap(hwnd)) {
+    RECT client;
+    GetClientRect(hwnd, &client);
     ID2D1HwndRenderTarget_BeginDraw(g_imageRenderTarget);
-    const D2D1_COLOR_F white = {1.0f, 1.0f, 1.0f, 1.0f};
-    ID2D1HwndRenderTarget_Clear(g_imageRenderTarget, &white);
-    ID2D1HwndRenderTarget_EndDraw(g_imageRenderTarget, NULL, NULL);
+    draw_image_background(&client);
+    HRESULT hr = ID2D1HwndRenderTarget_EndDraw(g_imageRenderTarget, NULL, NULL);
+    if (hr == (HRESULT) D2DERR_RECREATE_TARGET) {
+      release_image_render_target();
+    }
     return;
   }
 
@@ -1046,8 +1637,7 @@ static void draw_image_view(HWND hwnd) {
                              (FLOAT) imageRect.bottom};
 
   ID2D1HwndRenderTarget_BeginDraw(g_imageRenderTarget);
-  const D2D1_COLOR_F white = {1.0f, 1.0f, 1.0f, 1.0f};
-  ID2D1HwndRenderTarget_Clear(g_imageRenderTarget, &white);
+  draw_image_background(&client);
   ID2D1HwndRenderTarget_DrawBitmap(g_imageRenderTarget, g_imageBitmap, &destination, 1.0f,
                                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, NULL);
   HRESULT hr = ID2D1HwndRenderTarget_EndDraw(g_imageRenderTarget, NULL, NULL);
@@ -1065,10 +1655,13 @@ static void invalidate_image_view(void) {
 static void update_views(HWND hwnd) {
   if (g_textView) {
     if (g_snapshot.type == CLIPBOARD_CONTENT_TEXT) {
-      SetWindowTextW(g_textView, g_snapshot.text ? g_snapshot.text : L"");
+      reset_text_view_state();
       ShowWindow(g_textView, SW_SHOW);
+      if (GetFocus() == hwnd || GetFocus() == g_imageView) {
+        SetFocus(g_textView);
+      }
     } else {
-      SetWindowTextW(g_textView, L"");
+      reset_text_view_state();
       ShowWindow(g_textView, SW_HIDE);
       if (GetFocus() == g_textView) {
         SetFocus(hwnd);
@@ -1440,6 +2033,21 @@ static bool set_image_zoom(HWND hwnd, double zoom) {
   return true;
 }
 
+static bool set_text_zoom(HWND hwnd, double zoom) {
+  if (g_snapshot.type != CLIPBOARD_CONTENT_TEXT) {
+    return false;
+  }
+
+  g_textZoom = clamp_text_zoom(zoom);
+  create_text_format();
+  clamp_text_scroll(hwnd);
+  InvalidateRect(hwnd, NULL, TRUE);
+
+  HWND parent = GetParent(hwnd);
+  update_window_title(parent ? parent : hwnd);
+  return true;
+}
+
 static bool digit_key_value(WPARAM key, int* value) {
   if (key >= L'0' && key <= L'9') {
     *value = (int) (key - L'0');
@@ -1463,15 +2071,9 @@ static double regular_digit_zoom(int digit) {
   return zoomByDigit[digit];
 }
 
-static bool set_incremental_image_zoom(HWND hwnd, double delta) {
-  return set_image_zoom(hwnd, displayed_image_zoom(hwnd) + delta);
-}
+typedef bool (*SetZoomFn)(HWND hwnd, double zoom);
 
-static bool handle_image_key(HWND hwnd, WPARAM key) {
-  if (g_snapshot.type != CLIPBOARD_CONTENT_IMAGE) {
-    return false;
-  }
-
+static bool handle_zoom_key(HWND hwnd, WPARAM key, double currentZoom, SetZoomFn setZoom) {
   bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
   bool altDown = (GetKeyState(VK_MENU) & 0x8000) != 0;
   bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -1480,10 +2082,10 @@ static bool handle_image_key(HWND hwnd, WPARAM key) {
   }
 
   if (!altDown && (key == VK_SUBTRACT || key == VK_OEM_MINUS)) {
-    return set_incremental_image_zoom(hwnd, -0.1);
+    return setZoom(hwnd, currentZoom - 0.1);
   }
   if (!altDown && (key == VK_ADD || (key == VK_OEM_PLUS && shiftDown))) {
-    return set_incremental_image_zoom(hwnd, 0.1);
+    return setZoom(hwnd, currentZoom + 0.1);
   }
 
   int digit = 0;
@@ -1495,14 +2097,321 @@ static bool handle_image_key(HWND hwnd, WPARAM key) {
     if (digit < 1 || digit > 9) {
       return false;
     }
-    return set_image_zoom(hwnd, (double) (10 - digit) / 10.0);
+    return setZoom(hwnd, (double) (10 - digit) / 10.0);
   }
 
   if (digit >= 0 && digit <= 9) {
-    return set_image_zoom(hwnd, regular_digit_zoom(digit));
+    return setZoom(hwnd, regular_digit_zoom(digit));
   }
 
   return false;
+}
+
+static bool handle_image_key(HWND hwnd, WPARAM key) {
+  if (g_snapshot.type != CLIPBOARD_CONTENT_IMAGE) {
+    return false;
+  }
+
+  return handle_zoom_key(hwnd, key, displayed_image_zoom(hwnd), set_image_zoom);
+}
+
+static void scroll_text_by(HWND hwnd, int dx, int dy) {
+  set_text_scroll(hwnd, g_textScrollX + dx, g_textScrollY + dy);
+}
+
+static void handle_text_scroll_message(HWND hwnd, int bar, UINT code) {
+  int maxX = 0;
+  int maxY = 0;
+  text_max_scroll(hwnd, &maxX, &maxY);
+  int line = text_line_height(hwnd);
+  int page = 0;
+  int current = 0;
+  int maximum = 0;
+  if (bar == SB_VERT) {
+    RECT client;
+    GetClientRect(hwnd, &client);
+    page = max((client.bottom - client.top) - line, line);
+    current = g_textScrollY;
+    maximum = maxY;
+  } else {
+    RECT client;
+    GetClientRect(hwnd, &client);
+    page = max((client.right - client.left) - text_char_width(hwnd), text_char_width(hwnd));
+    current = g_textScrollX;
+    maximum = maxX;
+    line = text_char_width(hwnd);
+  }
+
+  switch (code) {
+  case SB_LINEUP:
+    current -= line;
+    break;
+  case SB_LINEDOWN:
+    current += line;
+    break;
+  case SB_PAGEUP:
+    current -= page;
+    break;
+  case SB_PAGEDOWN:
+    current += page;
+    break;
+  case SB_TOP:
+    current = 0;
+    break;
+  case SB_BOTTOM:
+    current = maximum;
+    break;
+  case SB_THUMBTRACK:
+  case SB_THUMBPOSITION: {
+    SCROLLINFO si = {0};
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_TRACKPOS;
+    if (GetScrollInfo(hwnd, bar, &si)) {
+      current = si.nTrackPos;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+
+  if (bar == SB_VERT) {
+    set_text_scroll(hwnd, g_textScrollX, current);
+  } else {
+    set_text_scroll(hwnd, current, g_textScrollY);
+  }
+}
+
+static UINT wheel_scroll_lines(void) {
+  UINT lines = 3;
+  SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+  return lines == 0 ? 3 : lines;
+}
+
+static void handle_text_mouse_wheel(HWND hwnd, int delta) {
+  g_textWheelRemainder += delta;
+  int steps = g_textWheelRemainder / WHEEL_DELTA;
+  g_textWheelRemainder %= WHEEL_DELTA;
+  if (steps == 0) {
+    return;
+  }
+
+  UINT lines = wheel_scroll_lines();
+  if (lines == WHEEL_PAGESCROLL) {
+    RECT client;
+    GetClientRect(hwnd, &client);
+    scroll_text_by(hwnd, 0, -steps * max(client.bottom - client.top, text_line_height(hwnd)));
+  } else {
+    scroll_text_by(hwnd, 0, -steps * (int) lines * text_line_height(hwnd));
+  }
+}
+
+static void handle_text_mouse_hwheel(HWND hwnd, int delta) {
+  g_textHWheelRemainder += delta;
+  int steps = g_textHWheelRemainder / WHEEL_DELTA;
+  g_textHWheelRemainder %= WHEEL_DELTA;
+  if (steps == 0) {
+    return;
+  }
+  scroll_text_by(hwnd, steps * 3 * text_char_width(hwnd), 0);
+}
+
+static bool handle_text_key(HWND hwnd, WPARAM key) {
+  bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+  if (ctrlDown && (key == L'A' || key == L'a')) {
+    g_textSelectionAnchor = 0;
+    g_textSelectionCaret = text_layout_length();
+    InvalidateRect(hwnd, NULL, TRUE);
+    return true;
+  }
+  if (ctrlDown && (key == L'C' || key == L'c')) {
+    copy_selected_text(hwnd);
+    return true;
+  }
+
+  if (ctrlDown && key != VK_HOME && key != VK_END) {
+    return false;
+  }
+
+  if (handle_zoom_key(hwnd, key, g_textZoom, set_text_zoom)) {
+    return true;
+  }
+
+  RECT client;
+  GetClientRect(hwnd, &client);
+  int line = text_line_height(hwnd);
+  int pageY = max((client.bottom - client.top) - line, line);
+  int maxX = 0;
+  int maxY = 0;
+  text_max_scroll(hwnd, &maxX, &maxY);
+
+  switch (key) {
+  case VK_UP:
+    scroll_text_by(hwnd, 0, -line);
+    return true;
+  case VK_DOWN:
+    scroll_text_by(hwnd, 0, line);
+    return true;
+  case VK_LEFT:
+    scroll_text_by(hwnd, -text_char_width(hwnd), 0);
+    return true;
+  case VK_RIGHT:
+    scroll_text_by(hwnd, text_char_width(hwnd), 0);
+    return true;
+  case VK_PRIOR:
+    scroll_text_by(hwnd, 0, -pageY);
+    return true;
+  case VK_NEXT:
+    scroll_text_by(hwnd, 0, pageY);
+    return true;
+  case VK_HOME:
+    if (ctrlDown) {
+      set_text_scroll(hwnd, 0, 0);
+    } else {
+      set_text_scroll(hwnd, 0, g_textScrollY);
+    }
+    return true;
+  case VK_END:
+    if (ctrlDown) {
+      set_text_scroll(hwnd, maxX, maxY);
+    } else {
+      set_text_scroll(hwnd, maxX, g_textScrollY);
+    }
+    return true;
+  case VK_SPACE:
+    scroll_text_by(hwnd, 0, pageY);
+    return true;
+  default:
+    return false;
+  }
+}
+
+static void update_text_autoscroll(HWND hwnd) {
+  if (!g_textSelecting) {
+    return;
+  }
+
+  POINT point;
+  GetCursorPos(&point);
+  ScreenToClient(hwnd, &point);
+
+  RECT client;
+  GetClientRect(hwnd, &client);
+  int dx = 0;
+  int dy = 0;
+  if (point.x < client.left) {
+    dx = -text_char_width(hwnd);
+  } else if (point.x >= client.right) {
+    dx = text_char_width(hwnd);
+  }
+  if (point.y < client.top) {
+    dy = -text_line_height(hwnd);
+  } else if (point.y >= client.bottom) {
+    dy = text_line_height(hwnd);
+  }
+
+  if (dx != 0 || dy != 0) {
+    scroll_text_by(hwnd, dx, dy);
+    update_text_selection_at_point(hwnd, point.x, point.y, true);
+  }
+}
+
+static LRESULT CALLBACK text_view_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  switch (msg) {
+  case WM_ERASEBKGND:
+    return 1;
+  case WM_SETFOCUS:
+  case WM_KILLFOCUS:
+    InvalidateRect(hwnd, NULL, TRUE);
+    return 0;
+  case WM_LBUTTONDOWN:
+    SetFocus(hwnd);
+    SetCapture(hwnd);
+    g_textSelecting = true;
+    update_text_selection_at_point(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), false);
+    SetTimer(hwnd, TEXT_AUTOSCROLL_TIMER, TEXT_AUTOSCROLL_INTERVAL_MS, NULL);
+    return 0;
+  case WM_MOUSEMOVE:
+    if (g_textSelecting && GetCapture() == hwnd) {
+      update_text_selection_at_point(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), true);
+    }
+    return 0;
+  case WM_LBUTTONUP:
+    if (g_textSelecting && GetCapture() == hwnd) {
+      update_text_selection_at_point(hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), true);
+      ReleaseCapture();
+    }
+    g_textSelecting = false;
+    KillTimer(hwnd, TEXT_AUTOSCROLL_TIMER);
+    return 0;
+  case WM_CAPTURECHANGED:
+    g_textSelecting = false;
+    KillTimer(hwnd, TEXT_AUTOSCROLL_TIMER);
+    return 0;
+  case WM_TIMER:
+    if (wParam == TEXT_AUTOSCROLL_TIMER) {
+      update_text_autoscroll(hwnd);
+      return 0;
+    }
+    break;
+  case WM_MOUSEWHEEL:
+    handle_text_mouse_wheel(hwnd, GET_WHEEL_DELTA_WPARAM(wParam));
+    return 0;
+  case WM_MOUSEHWHEEL:
+    handle_text_mouse_hwheel(hwnd, GET_WHEEL_DELTA_WPARAM(wParam));
+    return 0;
+  case WM_VSCROLL:
+    handle_text_scroll_message(hwnd, SB_VERT, LOWORD(wParam));
+    return 0;
+  case WM_HSCROLL:
+    handle_text_scroll_message(hwnd, SB_HORZ, LOWORD(wParam));
+    return 0;
+  case WM_KEYDOWN:
+  case WM_SYSKEYDOWN:
+    if (handle_text_key(hwnd, wParam)) {
+      return 0;
+    }
+    break;
+  case WM_SIZE:
+    resize_text_render_target(hwnd);
+    clamp_text_scroll(hwnd);
+    InvalidateRect(hwnd, NULL, TRUE);
+    return 0;
+  case WM_SYSCOLORCHANGE:
+    release_text_render_target();
+    InvalidateRect(hwnd, NULL, TRUE);
+    return 0;
+  case WM_PAINT: {
+    PAINTSTRUCT ps;
+    BeginPaint(hwnd, &ps);
+    EndPaint(hwnd, &ps);
+    draw_text_view(hwnd);
+    return 0;
+  }
+  case WM_DESTROY:
+    if (hwnd == g_textView) {
+      release_text_render_target();
+      g_textView = NULL;
+    }
+    return 0;
+  default:
+    break;
+  }
+
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static bool register_text_view_class(HINSTANCE instance) {
+  WNDCLASSEXW wc = {0};
+  wc.cbSize = sizeof(wc);
+  wc.lpfnWndProc = text_view_proc;
+  wc.hInstance = instance;
+  wc.lpszClassName = kTextViewClassName;
+  wc.style = CS_DBLCLKS;
+  wc.hCursor = LoadCursorW(NULL, IDC_IBEAM);
+  wc.hbrBackground = (HBRUSH) (COLOR_WINDOW + 1);
+  return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
 static LRESULT CALLBACK image_view_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -1562,19 +2471,19 @@ static void cleanup_image_view_resources(void) {
   release_graphics_resources();
 }
 
-static void focus_existing_window(void) {
+static void request_previous_instance_shutdown(void) {
   HWND existing = FindWindowW(kWindowClassName, NULL);
   if (!existing) {
     return;
   }
 
-  if (IsIconic(existing)) {
-    ShowWindow(existing, SW_RESTORE);
-  } else {
-    ShowWindow(existing, SW_SHOW);
+  DWORD existingPid = 0;
+  GetWindowThreadProcessId(existing, &existingPid);
+  if (existingPid == GetCurrentProcessId()) {
+    return;
   }
-  SetForegroundWindow(existing);
-  PostMessageW(existing, WM_APP_REFRESH, 0, 0);
+
+  PostMessageW(existing, WM_APP_EXIT, 0, 0);
 }
 
 static void release_single_instance_mutex(void) {
@@ -1586,16 +2495,27 @@ static void release_single_instance_mutex(void) {
 }
 
 static bool acquire_single_instance(void) {
-  g_singleInstanceMutex = CreateMutexW(NULL, TRUE, kSingleInstanceMutexName);
+  g_singleInstanceMutex = CreateMutexW(NULL, FALSE, kSingleInstanceMutexName);
   if (!g_singleInstanceMutex) {
+    MessageBoxW(NULL, L"Unable to create the single-instance mutex.", kAppTitle, MB_ICONERROR | MB_OK);
     return false;
   }
 
-  if (GetLastError() != ERROR_ALREADY_EXISTS) {
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    request_previous_instance_shutdown();
+  }
+
+  DWORD waitResult = WaitForSingleObject(g_singleInstanceMutex, 5000);
+  if (waitResult == WAIT_OBJECT_0 || waitResult == WAIT_ABANDONED) {
     return true;
   }
 
-  focus_existing_window();
+  if (waitResult == WAIT_TIMEOUT) {
+    MessageBoxW(NULL, L"Timed out waiting for the previous Board instance to exit.", kAppTitle, MB_ICONERROR | MB_OK);
+  } else {
+    MessageBoxW(NULL, L"Unable to wait for the single-instance mutex.", kAppTitle, MB_ICONERROR | MB_OK);
+  }
+
   CloseHandle(g_singleInstanceMutex);
   g_singleInstanceMutex = NULL;
   return false;
@@ -1607,15 +2527,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     HINSTANCE instance = ((CREATESTRUCTW*) lParam)->hInstance;
     recreate_fonts(hwnd);
 
-    g_textView = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL |
-                                     ES_AUTOHSCROLL | ES_READONLY,
-                                 0, 0, 0, 0, hwnd, (HMENU) (INT_PTR) IDC_TEXT_VIEW, instance, NULL);
+    g_textView = CreateWindowExW(WS_EX_CLIENTEDGE, kTextViewClassName, L"",
+                                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP | WS_CLIPSIBLINGS, 0, 0,
+                                 0, 0, hwnd, (HMENU) (INT_PTR) IDC_TEXT_VIEW, instance, NULL);
     if (!g_textView) {
       return -1;
     }
-    SendMessageW(g_textView, WM_SETFONT, (WPARAM) text_font(), TRUE);
-    SendMessageW(g_textView, EM_SETLIMITTEXT, (WPARAM) 0x7FFFFFFE, 0);
     create_text_tooltip(hwnd);
 
     g_imageView = CreateWindowExW(0, kImageViewClassName, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 0, 0,
@@ -1635,8 +2552,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     g_clipboardListenerRegistered = true;
     return 0;
   }
-  case WM_APP_REFRESH:
-    refresh_clipboard(hwnd);
+  case WM_APP_EXIT:
+    DestroyWindow(hwnd);
     return 0;
   case WM_CLIPBOARDUPDATE:
     refresh_clipboard(hwnd);
@@ -1655,6 +2572,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     return 0;
   case WM_KEYDOWN:
   case WM_SYSKEYDOWN:
+    if (g_snapshot.type == CLIPBOARD_CONTENT_TEXT && g_textView && handle_text_key(g_textView, wParam)) {
+      return 0;
+    }
     if (handle_image_key(hwnd, wParam)) {
       return 0;
     }
@@ -1748,7 +2668,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR commandL
   g_comInitialized = true;
 
   if (!initialize_graphics_resources()) {
-    MessageBoxW(NULL, L"Unable to initialize image rendering.", kAppTitle, MB_ICONERROR | MB_OK);
+    MessageBoxW(NULL, L"Unable to initialize rendering.", kAppTitle, MB_ICONERROR | MB_OK);
     cleanup_image_view_resources();
     CoUninitialize();
     g_comInitialized = false;
@@ -1759,7 +2679,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR commandL
     cleanup_image_view_resources();
     CoUninitialize();
     g_comInitialized = false;
-    return 0;
+    return 1;
   }
 
   WNDCLASSEXW wc = {0};
@@ -1774,6 +2694,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR commandL
   wc.hbrBackground = (HBRUSH) (COLOR_WINDOW + 1);
 
   if (!RegisterClassExW(&wc)) {
+    cleanup_image_view_resources();
+    release_single_instance_mutex();
+    CoUninitialize();
+    g_comInitialized = false;
+    return 1;
+  }
+
+  if (!register_text_view_class(hInstance)) {
     cleanup_image_view_resources();
     release_single_instance_mutex();
     CoUninitialize();

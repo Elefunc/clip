@@ -10,7 +10,7 @@ RC32 := i686-w64-mingw32-windres
 SIGN ?= cs
 
 CFLAGS_COMMON := -std=c11 -Wall -Wextra -Wpedantic -O2 -flto -municode -DUNICODE -D_UNICODE -DCOBJMACROS -fno-asynchronous-unwind-tables -fno-unwind-tables
-LDFLAGS := -Wl,-s -Wl,--gc-sections -flto -mwindows -ld2d1 -lole32 -lwindowscodecs -lgdi32 -luuid -lcomctl32
+LDFLAGS := -Wl,-s -Wl,--gc-sections -flto -mwindows -ld2d1 -ldwrite -lole32 -lwindowscodecs -lgdi32 -luuid -lcomctl32
 RCFLAGS := --codepage=65001 -O coff
 
 TARGET64 := board64.exe

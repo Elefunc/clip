@@ -13,5 +13,6 @@ obj/
 trim/trim.rules
 
 # Temporary files
+tmp/
 *.log
 .DS_Store

@@ -111,7 +111,6 @@ static bool g_textSelecting = false;
 static int g_textWheelRemainder = 0;
 static int g_textHWheelRemainder = 0;
 static double g_textZoom = 1.0;
-static bool g_imageZoomExplicit = false;
 static double g_imageZoom = 1.0;
 static DWORD g_clipboardSequence = 0;
 static bool g_comInitialized = false;
@@ -813,39 +812,9 @@ static double clamp_text_zoom(double zoom) {
   return zoom;
 }
 
-static void reset_image_view_state(void) {
-  g_imageZoomExplicit = false;
-  g_imageZoom = 1.0;
-}
-
-static double fit_image_zoom(HWND hwnd) {
-  if (g_snapshot.type != CLIPBOARD_CONTENT_IMAGE || g_snapshot.bitmapWidth <= 0 || g_snapshot.bitmapHeight <= 0) {
-    return 1.0;
-  }
-
-  RECT bounds;
-  if (g_imageView && IsWindow(g_imageView)) {
-    GetClientRect(g_imageView, &bounds);
-  } else {
-    GetClientRect(hwnd, &bounds);
-  }
-  int availableWidth = bounds.right - bounds.left;
-  int availableHeight = bounds.bottom - bounds.top;
-  if (availableWidth <= 0 || availableHeight <= 0) {
-    return 1.0;
-  }
-
-  double xZoom = (double) availableWidth / (double) g_snapshot.bitmapWidth;
-  double yZoom = (double) availableHeight / (double) g_snapshot.bitmapHeight;
-  double zoom = xZoom < yZoom ? xZoom : yZoom;
-  return zoom > 0.0 ? zoom : 1.0;
-}
-
 static double current_image_zoom(HWND hwnd) {
-  if (g_imageZoomExplicit) {
-    return g_imageZoom;
-  }
-  return fit_image_zoom(hwnd);
+  (void) hwnd;
+  return g_imageZoom;
 }
 
 static bool current_image_ratio(double* ratio) {
@@ -1686,19 +1655,10 @@ static void update_views(HWND hwnd) {
 static void refresh_clipboard(HWND hwnd) {
   DWORD sequence = GetClipboardSequenceNumber();
   bool clipboardChanged = sequence == 0 || sequence != g_clipboardSequence;
-  bool hadImage =
-      g_snapshot.type == CLIPBOARD_CONTENT_IMAGE && g_snapshot.bitmapWidth > 0 && g_snapshot.bitmapHeight > 0;
-  double preservedZoom = hadImage ? (g_imageZoomExplicit ? g_imageZoom : displayed_image_zoom(hwnd)) : 1.0;
 
   ClipboardSnapshot snapshot;
   read_clipboard_snapshot(hwnd, &snapshot);
   bool newImage = clipboardChanged && snapshot.type == CLIPBOARD_CONTENT_IMAGE;
-  if (newImage) {
-    g_imageZoomExplicit = true;
-    g_imageZoom = clamp_image_zoom(preservedZoom);
-  } else if (clipboardChanged || snapshot.type != CLIPBOARD_CONTENT_IMAGE) {
-    reset_image_view_state();
-  }
   g_clipboardSequence = sequence;
   release_image_bitmap();
   replace_clipboard_snapshot(&snapshot);
@@ -2024,7 +1984,6 @@ static bool set_image_zoom(HWND hwnd, double zoom) {
     return false;
   }
 
-  g_imageZoomExplicit = true;
   g_imageZoom = clamp_image_zoom(zoom);
   resize_window_for_image_zoom(hwnd);
   layout_children(hwnd);
@@ -2616,7 +2575,6 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     break;
   case WM_EXITSIZEMOVE:
     if (g_snapshot.type == CLIPBOARD_CONTENT_IMAGE) {
-      g_imageZoomExplicit = true;
       g_imageZoom = clamp_image_zoom(displayed_image_zoom(hwnd));
       update_window_title(hwnd);
     }

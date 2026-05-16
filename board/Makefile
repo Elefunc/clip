@@ -10,7 +10,7 @@ RC32 := i686-w64-mingw32-windres
 SIGN ?= cs
 
 CFLAGS_COMMON := -std=c11 -Wall -Wextra -Wpedantic -O2 -flto -municode -DUNICODE -D_UNICODE -DCOBJMACROS -fno-asynchronous-unwind-tables -fno-unwind-tables
-LDFLAGS := -Wl,-s -Wl,--gc-sections -flto -mwindows -ld2d1 -ldwrite -lole32 -lwindowscodecs -lgdi32 -luuid -lcomctl32
+LDFLAGS := -Wl,-s -Wl,--gc-sections -flto -mwindows -ld2d1 -ld3d11 -ldxgi -ldwrite -ldwmapi -luxtheme -lole32 -lwindowscodecs -lgdi32 -ladvapi32 -luuid -lcomctl32
 RCFLAGS := --codepage=65001 -O coff
 
 TARGET64 := board64.exe
@@ -33,10 +33,10 @@ $(TARGET32): $(OBJ32) $(RES32)
 	$(CC32) $(CFLAGS_COMMON) $(OBJ32) $(RES32) -o $@ $(LDFLAGS)
 	@$(SIGN_AND_WARN)
 
-$(OBJ64): $(SRC) | $(OBJDIR)
+$(OBJ64): $(SRC) d2d1_3_compat.h | $(OBJDIR)
 	$(CC64) $(CFLAGS_COMMON) -c $< -o $@
 
-$(OBJ32): $(SRC) | $(OBJDIR)
+$(OBJ32): $(SRC) d2d1_3_compat.h | $(OBJDIR)
 	$(CC32) $(CFLAGS_COMMON) -c $< -o $@
 
 $(OBJDIR):

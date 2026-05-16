@@ -3993,9 +3993,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR commandL
     return 1;
   }
 
-  HWND hwnd = CreateWindowExW(0, kWindowClassName, kAppTitle, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT,
-                              CW_USEDEFAULT, scale_for_dpi(900, g_currentDpi), scale_for_dpi(650, g_currentDpi), NULL,
-                              NULL, hInstance, NULL);
+  DWORD windowStyle = (WS_OVERLAPPEDWINDOW & ~(WS_MINIMIZEBOX | WS_MAXIMIZEBOX)) | WS_CLIPCHILDREN;
+  HWND hwnd =
+      CreateWindowExW(0, kWindowClassName, kAppTitle, windowStyle, CW_USEDEFAULT, CW_USEDEFAULT,
+                      scale_for_dpi(900, g_currentDpi), scale_for_dpi(650, g_currentDpi), NULL, NULL, hInstance, NULL);
   if (!hwnd) {
     release_window_background_brush();
     cleanup_image_view_resources();
